@@ -1,0 +1,245 @@
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    line-height: 1.6;
+    padding: 20px;
+    background-color: #f5f5f5;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+h1 {
+    text-align: center;
+    margin-bottom: 30px;
+    color: #333;
+}
+
+.search-section {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 30px;
+}
+
+input[type="text"] {
+    flex: 1;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 16px;
+}
+
+button {
+    padding: 10px 20px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+}
+
+button:hover {
+    background-color: #0056b3;
+}
+
+.results-section {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+}
+
+.official-card {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 10px 0;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    position: relative;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.official-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.local-official {
+    border: 2px solid #4CAF50;
+    background: #f8fff8;
+}
+
+.local-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: #4CAF50;
+    color: white;
+    padding: 5px 10px;
+    border-radius: 15px;
+    font-size: 0.8em;
+    font-weight: bold;
+}
+
+.official-photo {
+    width: 100px;
+    height: 100px;
+    object-fit: cover;
+    border-radius: 50%;
+    margin-bottom: 15px;
+}
+
+.address-input-container {
+    position: relative;
+    flex: 1;
+}
+
+.suggestions-container {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: white;
+    border: 1px solid #ddd;
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    max-height: 200px;
+    overflow-y: auto;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
+    display: none;
+}
+
+.suggestion-item {
+    padding: 10px;
+    cursor: pointer;
+    border-bottom: 1px solid #eee;
+}
+
+.suggestion-item:last-child {
+    border-bottom: none;
+}
+
+.suggestion-item:hover {
+    background-color: #f5f5f5;
+}
+
+.pac-container {
+    border-radius: 4px;
+    margin-top: 2px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.pac-item {
+    padding: 8px;
+    font-family: Arial, sans-serif;
+}
+
+.pac-item:hover {
+    background-color: #f5f5f5;
+}
+
+.debug-info {
+    background-color: #fff3cd;
+    color: #856404;
+    padding: 10px;
+    margin-bottom: 20px;
+    border: 1px solid #ffeeba;
+    border-radius: 4px;
+    text-align: center;
+}
+
+.loading {
+    text-align: center;
+    color: #007bff;
+    font-weight: bold;
+    padding: 20px;
+}
+
+.loading::after {
+    content: "...";
+    animation: dots 1.5s steps(5, end) infinite;
+}
+
+@keyframes dots {
+    0%, 20% { content: "." }
+    40% { content: ".." }
+    60%, 100% { content: "..." }
+}
+
+.results-summary {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 20px;
+    text-align: center;
+    border: 1px solid #dee2e6;
+}
+
+.results-summary p {
+    margin: 5px 0;
+    color: #495057;
+}
+
+.results-summary p:first-child {
+    font-weight: bold;
+    color: #212529;
+}
+
+.results-summary ul {
+    list-style: none;
+    padding: 0;
+    margin: 10px 0;
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+}
+
+.results-summary li {
+    padding: 5px 10px;
+    border-radius: 4px;
+    background: #fff;
+    border: 1px solid #dee2e6;
+}
+
+.results-summary .note {
+    font-size: 0.9em;
+    color: #6c757d;
+    font-style: italic;
+}
+
+.official-level {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 0.8em;
+    font-weight: bold;
+    margin: 5px 0;
+}
+
+.federal-level {
+    background-color: #cce5ff;
+    color: #004085;
+}
+
+.state-level {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.local-level {
+    background-color: #fff3cd;
+    color: #856404;
+}

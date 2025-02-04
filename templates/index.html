@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>US Elected Officials Tracker</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body data-debug="{{ 'true' if debug_mode else 'false' }}">
+    <div class="container">
+        <h1>US Elected Officials Tracker</h1>
+        {% if debug_mode %}
+        <div class="debug-info">
+            <p>Debug Mode: ON</p>
+            <p>Check browser console for detailed logs</p>
+        </div>
+        {% endif %}
+        <div class="search-section">
+            <div class="address-input-container">
+                <input type="text" id="address" placeholder="Enter your address" autocomplete="off">
+                <div id="address-suggestions" class="suggestions-container"></div>
+            </div>
+            <button onclick="searchRepresentatives()">Search</button>
+        </div>
+        <div id="results" class="results-section"></div>
+    </div>
+    <script src="https://maps.googleapis.com/maps/api/js?key={{ api_key }}&libraries=places&callback=Function.prototype"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
