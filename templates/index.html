@@ -24,7 +24,80 @@
         </div>
         <div id="results" class="results-section"></div>
     </div>
-    <script src="https://maps.googleapis.com/maps/api/js?key={{ api_key }}&libraries=places&callback=Function.prototype"></script>
+     <!-- Actions Modal -->
+     <div id="actionsModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2 id="modalTitle"></h2>
+            
+            <!-- Filters -->
+            <div class="filters">
+                <select id="timeFilter">
+                    <option value="7">Last 7 days</option>
+                    <option value="30" selected>Last 30 days</option>
+                    <option value="90">Last 90 days</option>
+                    <option value="180">Last 6 months</option>
+                    <option value="365">Last year</option>
+                </select>
+                
+                <select id="actionTypeFilter">
+                    <option value="all" selected>All Actions</option>
+                    <option value="votes">Votes</option>
+                    <option value="press_releases">Press Releases</option>
+                    <option value="news">News Mentions</option>
+                </select>
+            </div>
+            
+            <!-- Loading Spinner -->
+            <div id="actionsLoading" class="loading-spinner"></div>
+            
+            <!-- Error Message -->
+            <div id="actionsError" class="error-message"></div>
+            
+            <!-- Actions Content -->
+            <div id="actionsContent" style="display: none;">
+                <!-- Summary Cards -->
+                <div class="summary-cards">
+                    <div class="summary-card votes">
+                        <h3>Votes</h3>
+                        <div class="count">0</div>
+                    </div>
+                    <div class="summary-card press-releases">
+                        <h3>Press Releases</h3>
+                        <div class="count">0</div>
+                    </div>
+                    <div class="summary-card news">
+                        <h3>News Mentions</h3>
+                        <div class="count">0</div>
+                    </div>
+                </div>
+                
+                <!-- Timeline -->
+                <div class="actions-timeline"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Load Google Maps API dynamically
+        function loadGoogleMapsAPI() {
+            const script = document.createElement('script');
+            script.src = `https://maps.googleapis.com/maps/api/js?key={{ google_api_key }}&libraries=places&callback=initAutocomplete`;
+            script.async = true;
+            script.defer = true;
+            document.head.appendChild(script);
+        }
+
+        // Handle API loading errors
+        window.gm_authFailure = function() {
+            console.error('Google Maps API authentication failed');
+            document.getElementById('address').placeholder = 'Error loading Google Maps API';
+            document.getElementById('address').disabled = true;
+        };
+
+        // Load API when document is ready
+        document.addEventListener('DOMContentLoaded', loadGoogleMapsAPI);
+    </script>
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>

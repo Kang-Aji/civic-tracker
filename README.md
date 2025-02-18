@@ -1,26 +1,18 @@
 # Civic Tracker
 
-A web application that helps citizens find and track their elected officials at all levels of government - federal, state, and local.
+A web application that helps citizens track their elected officials and their actions.
 
 ## Features
 
-- View all US elected officials in one place
-- Filter officials by location
-- Automatic categorization of federal, state, and local officials
-- Real-time search and filtering
-- Detailed information about each official including:
-  - Office held
-  - Contact information
-  - Official websites
-  - Party affiliation
-  - Photos (when available)
-
-## Technical Stack
-
-- Backend: Python/Flask
-- Frontend: HTML, JavaScript, CSS
-- APIs: Google Civic Information API
-- Additional: Google Places API for address autocomplete
+- Find all your elected representatives by address
+- Filter officials by federal, state, and local levels
+- View contact information and official websites
+- Track official actions including:
+  - Voting records (for Congress members)
+  - Press releases
+  - News mentions
+- Timeline view of all official activities
+- Real-time updates of official actions
 
 ## Setup
 
@@ -35,17 +27,61 @@ cd civic-tracker
 pip install -r requirements.txt
 ```
 
-3. Create a `config.py` file with your API keys:
-```python
-GOOGLE_API_KEY = 'your-api-key'
-DEBUG = False
-CIVIC_INFO_API_URL = 'https://civicinfo.googleapis.com/civicinfo/v2/representatives'
+3. Set up environment variables in `.env`:
+```
+GOOGLE_API_KEY=your_google_api_key_here
+PROPUBLICA_API_KEY=your_propublica_api_key_here
 ```
 
-4. Run the application:
+4. Initialize the database:
 ```bash
-python app.py
+flask db upgrade
 ```
+
+5. Run the application:
+```bash
+python -m flask run
+```
+
+## Required API Keys
+
+1. Google Civic Information API
+   - Used to fetch elected official information
+   - Enable it in Google Cloud Console
+   - Set the API key in `.env`
+
+2. ProPublica Congress API (optional, for congressional voting records)
+   - Get API key from ProPublica
+   - Set the API key in `.env`
+
+## Adding Action Sources
+
+To track an official's actions, you can add sources:
+
+```bash
+curl -X POST http://localhost:5000/official/sources \
+  -H "Content-Type: application/json" \
+  -d '{
+    "official_name": "Official Name",
+    "source_type": "rss",
+    "source_url": "https://example.com/feed.xml"
+  }'
+```
+
+Source types:
+- `rss`: RSS feed of news or press releases
+- `website`: Official's website press release page
+- `api`: API endpoint (like ProPublica for Congress members)
+
+## Development
+
+The application uses:
+- Flask for the web framework
+- SQLAlchemy for database management
+- Flask-Migrate for database migrations
+- APScheduler for periodic updates
+- BeautifulSoup4 for web scraping
+- Feedparser for RSS processing
 
 ## Contributing
 

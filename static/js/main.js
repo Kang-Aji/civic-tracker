@@ -37,6 +37,27 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         // Load all officials
         await loadAllOfficials();
+        
+        // Initialize search functionality
+        initAutocomplete();
+        
+        // Add event listener for the search button
+        document.querySelector('button').addEventListener('click', function() {
+            const address = document.getElementById('address').value;
+            if (address) {
+                searchRepresentatives(address);
+            }
+        });
+        
+        // Add event listener for Enter key in address input
+        document.getElementById('address').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                const address = this.value;
+                if (address) {
+                    searchRepresentatives(address);
+                }
+            }
+        });
     } catch (error) {
         console.error('Error initializing:', error);
         addressInput.placeholder = 'Enter address (Places API not available)';
@@ -45,25 +66,36 @@ document.addEventListener('DOMContentLoaded', async function() {
 
 async function loadAllOfficials() {
     const resultsDiv = document.getElementById('results');
+    resultsDiv.innerHTML = '<div class="loading-spinner"></div>';
+    
     try {
-        resultsDiv.innerHTML = '<p class="loading">Loading all US elected officials...</p>';
         const response = await fetch('/all_officials');
         const data = await response.json();
         
-        if (response.ok) {
-            allOfficials = data.officials;
-            log('Loaded all officials:', {
-                count: allOfficials.length,
-                sample: allOfficials.slice(0, 3)
-            });
-            displayResults({ officials: allOfficials });
-        } else {
-            resultsDiv.innerHTML = `<p class="error-message">${data.error}</p>`;
-            log('Error loading officials:', data.error);
+        if (data.error) {
+            resultsDiv.innerHTML = `<div class="error">${data.error}</div>`;
+            return;
         }
+        
+        displayResults({
+            officials: data,
+            counts: {
+                federal: data.filter(o => o.offices.some(office => 
+                    office.includes('United States') || office.includes('President') || office.includes('Congress')
+                )).length,
+                state: data.filter(o => o.offices.some(office => 
+                    office.includes('State') || office.includes('Governor') || office.includes('Senator') || office.includes('Assembly')
+                )).length,
+                local: data.filter(o => o.offices.every(office => 
+                    !office.includes('United States') && !office.includes('President') && !office.includes('Congress') &&
+                    !office.includes('State') && !office.includes('Governor') && !office.includes('Senator') && !office.includes('Assembly')
+                )).length
+            }
+        });
+        
     } catch (error) {
-        console.error('Error loading all officials:', error);
-        resultsDiv.innerHTML = '<p class="error-message">Error loading officials list</p>';
+        console.error('Error:', error);
+        resultsDiv.innerHTML = '<div class="error">Error loading officials. Please try again.</div>';
     }
 }
 
@@ -74,29 +106,43 @@ async function searchRepresentatives() {
 
     if (!address) {
         // If address is cleared, show all officials
-        displayResults({ officials: allOfficials });
+        displayResults({
+            officials: allOfficials,
+            counts: {
+                federal: allOfficials.filter(o => o.offices.some(office => 
+                    office.includes('United States') || office.includes('President') || office.includes('Congress')
+                )).length,
+                state: allOfficials.filter(o => o.offices.some(office => 
+                    office.includes('State') || office.includes('Governor') || office.includes('Senator') || office.includes('Assembly')
+                )).length,
+                local: allOfficials.filter(o => o.offices.every(office => 
+                    !office.includes('United States') && !office.includes('President') && !office.includes('Congress') &&
+                    !office.includes('State') && !office.includes('Governor') && !office.includes('Senator') && !office.includes('Assembly')
+                )).length
+            }
+        });
         return;
     }
 
     try {
-        resultsDiv.innerHTML = '<p class="loading">Searching representatives for your area...</p>';
+        resultsDiv.innerHTML = '<div class="loading-spinner"></div>';
         log('Searching representatives for address:', address);
 
-        const response = await fetch(`/search_representatives?address=${encodeURIComponent(address)}`);
+        const response = await fetch(`/search?address=${encodeURIComponent(address)}`);
         const data = await response.json();
 
         log('API Response:', data);
 
-        if (response.ok) {
-            // Filter the display to show only officials for this address
-            filterAndDisplayResults(data);
-        } else {
-            resultsDiv.innerHTML = `<p class="error-message">${data.error}</p>`;
-            log('API Error:', data.error);
+        if (data.error) {
+            resultsDiv.innerHTML = `<div class="error">${data.error}</div>`;
+            return;
         }
+        
+        displayResults(data);
+        
     } catch (error) {
         console.error('Error fetching data:', error);
-        resultsDiv.innerHTML = '<p class="error-message">An error occurred while fetching the data</p>';
+        resultsDiv.innerHTML = '<div class="error">An error occurred while fetching the data</div>';
     }
 }
 
@@ -120,7 +166,7 @@ function filterAndDisplayResults(addressData) {
     resultsDiv.innerHTML = '';
 
     if (!addressData.officials || !addressData.offices) {
-        resultsDiv.innerHTML = '<p class="error-message">No officials found for this address</p>';
+        resultsDiv.innerHTML = '<div class="error-message">No officials found for this address</div>';
         return;
     }
 
@@ -214,18 +260,20 @@ function filterAndDisplayResults(addressData) {
     `;
     resultsDiv.appendChild(summaryDiv);
 
+    const fragment = document.createDocumentFragment();
     filteredOfficials.forEach(official => {
         const card = createOfficialCard(official);
-        resultsDiv.appendChild(card);
+        fragment.appendChild(card);
     });
+    resultsDiv.appendChild(fragment);
 }
 
 function displayResults(data) {
     const resultsDiv = document.getElementById('results');
     resultsDiv.innerHTML = '';
-
+    
     if (!data.officials || data.officials.length === 0) {
-        resultsDiv.innerHTML = '<p class="error-message">No officials found</p>';
+        resultsDiv.innerHTML = '<div class="error-message">No officials found</div>';
         return;
     }
 
@@ -256,10 +304,12 @@ function displayResults(data) {
     `;
     resultsDiv.appendChild(summaryDiv);
 
+    const fragment = document.createDocumentFragment();
     data.officials.forEach(official => {
         const card = createOfficialCard(official);
-        resultsDiv.appendChild(card);
+        fragment.appendChild(card);
     });
+    resultsDiv.appendChild(fragment);
 }
 
 function createOfficialCard(official) {
@@ -285,8 +335,219 @@ function createOfficialCard(official) {
         ${official.emails ? `<p><strong>Email:</strong> ${official.emails[0]}</p>` : ''}
         ${official.urls ? `<p><a href="${official.urls[0]}" target="_blank" rel="noopener">Official Website</a></p>` : ''}
         ${official.isLocal ? '<div class="local-badge">Your Representative</div>' : ''}
+        <button class="view-actions-btn" onclick="showActionsModal(${JSON.stringify(official)})">
+            View Actions
+        </button>
     `;
 
     card.innerHTML = content;
     return card;
+}
+
+// Debounce function to limit API calls
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// Cache DOM elements
+const resultsContainer = document.getElementById('results');
+const actionsModal = document.getElementById('actionsModal');
+const modalClose = document.querySelector('.close');
+const timeFilter = document.getElementById('timeFilter');
+const actionTypeFilter = document.getElementById('actionTypeFilter');
+const actionsContent = document.getElementById('actionsContent');
+const loadingSpinner = document.getElementById('actionsLoading');
+const errorMessage = document.getElementById('actionsError');
+
+let currentOfficial = null;
+let actionsData = null;
+
+// Create a document fragment for better performance
+function createOfficialCards(officials) {
+    const fragment = document.createDocumentFragment();
+    
+    officials.forEach(official => {
+        const card = document.createElement('div');
+        card.className = 'official-card';
+        
+        const content = `
+            <h3>${official.name}</h3>
+            <p class="office">${official.office}</p>
+            ${official.party ? `<p class="party">${official.party}</p>` : ''}
+            <div class="contact-info">
+                ${official.phones ? `<p>📞 ${official.phones[0]}</p>` : ''}
+                ${official.emails ? `<p>✉️ <a href="mailto:${official.emails[0]}">${official.emails[0]}</a></p>` : ''}
+                ${official.urls ? `<p>🌐 <a href="${official.urls[0]}" target="_blank">Official Website</a></p>` : ''}
+            </div>
+            <button class="view-actions-btn" onclick="showActionsModal(${JSON.stringify(official)})">
+                View Actions
+            </button>
+        `;
+        
+        card.innerHTML = content;
+        fragment.appendChild(card);
+    });
+    
+    return fragment;
+}
+
+// Optimize the display of actions
+function displayActions(actions) {
+    actionsData = actions;
+    
+    const timeline = actionsContent.querySelector('.actions-timeline');
+    const summaryCards = {
+        votes: actionsContent.querySelector('.summary-card.votes .count'),
+        press_releases: actionsContent.querySelector('.summary-card.press-releases .count'),
+        news: actionsContent.querySelector('.summary-card.news .count')
+    };
+    
+    // Reset counts using a single loop
+    Object.values(summaryCards).forEach(card => card.textContent = '0');
+    
+    // Create action counts and timeline items in a single pass
+    const actionsByType = {};
+    const timelineFragment = document.createDocumentFragment();
+    
+    actions.forEach(action => {
+        // Update counts
+        actionsByType[action.action_type] = (actionsByType[action.action_type] || 0) + 1;
+        
+        // Create timeline item
+        const item = document.createElement('div');
+        item.className = `timeline-item ${action.action_type}`;
+        item.dataset.type = action.action_type;
+        
+        const date = new Date(action.date);
+        item.innerHTML = `
+            <div class="date">${date.toLocaleDateString()}</div>
+            <div class="title">${action.action_type.replace('_', ' ').toUpperCase()}</div>
+            <div class="description">${action.description}</div>
+            ${action.source_url ? `
+                <div class="source">
+                    <a href="${action.source_url}" target="_blank" rel="noopener noreferrer">View Source</a>
+                </div>
+            ` : ''}
+        `;
+        
+        timelineFragment.appendChild(item);
+    });
+    
+    // Update summary cards
+    Object.entries(actionsByType).forEach(([type, count]) => {
+        if (summaryCards[type]) {
+            summaryCards[type].textContent = count;
+        }
+    });
+    
+    // Clear and update timeline in a single operation
+    timeline.innerHTML = '';
+    timeline.appendChild(timelineFragment);
+    
+    actionsContent.style.display = 'block';
+    filterActions();
+}
+
+// Optimize filtering
+function filterActions() {
+    const selectedType = actionTypeFilter.value;
+    const timelineItems = document.querySelectorAll('.timeline-item');
+    
+    // Use classList for better performance
+    timelineItems.forEach(item => {
+        item.classList.toggle('hidden', selectedType !== 'all' && item.dataset.type !== selectedType);
+    });
+}
+
+// Debounced search function
+const debouncedSearch = debounce(() => {
+    const address = document.getElementById('address').value;
+    if (address) {
+        searchRepresentatives(address);
+    }
+}, 300);
+
+// Event listeners
+modalClose.onclick = () => {
+    actionsModal.style.display = 'none';
+    currentOfficial = null;
+    actionsData = null;
+};
+
+window.onclick = (event) => {
+    if (event.target === actionsModal) {
+        actionsModal.style.display = 'none';
+        currentOfficial = null;
+        actionsData = null;
+    }
+};
+
+timeFilter.onchange = () => {
+    if (currentOfficial) {
+        fetchOfficialActions(currentOfficial);
+    }
+};
+
+actionTypeFilter.onchange = filterActions;
+
+// Actions Modal
+function showActionsModal(official) {
+    currentOfficial = official;
+    document.getElementById('modalTitle').textContent = `${official.name}'s Actions`;
+    actionsModal.style.display = 'block';
+    fetchOfficialActions(official);
+}
+
+async function fetchOfficialActions(official) {
+    const actionsContent = document.getElementById('actionsContent');
+    const loadingSpinner = document.getElementById('actionsLoading');
+    const errorMessage = document.getElementById('actionsError');
+    
+    try {
+        actionsContent.style.display = 'none';
+        loadingSpinner.style.display = 'block';
+        errorMessage.style.display = 'none';
+        
+        const days = timeFilter.value;
+        const response = await fetch(`/official/actions/${encodeURIComponent(official.name)}?days=${days}`);
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to fetch actions');
+        }
+        
+        displayActions(data.actions);
+        
+    } catch (error) {
+        console.error('Error fetching actions:', error);
+        errorMessage.textContent = error.message;
+        errorMessage.style.display = 'block';
+        actionsContent.style.display = 'none';
+    } finally {
+        loadingSpinner.style.display = 'none';
+    }
+}
+
+// Initialize Google Places Autocomplete
+function initAutocomplete() {
+    const addressInput = document.getElementById('address');
+    const autocomplete = new google.maps.places.Autocomplete(addressInput, {
+        types: ['address'],
+        componentRestrictions: { country: 'us' }
+    });
+    
+    autocomplete.addListener('place_changed', () => {
+        const place = autocomplete.getPlace();
+        if (place.formatted_address) {
+            searchRepresentatives(place.formatted_address);
+        }
+    });
 }
