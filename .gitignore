@@ -34,7 +34,18 @@ ENV/
 config.py
 *.log
 .env
+.env.*
+!.env.example
+!.env.production
+
+# Backups
+backups/
+*.sql
+*.dump
 
 # System
 .DS_Store
 Thumbs.db
+
+# Docker
+docker-compose.override.yml

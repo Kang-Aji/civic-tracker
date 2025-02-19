@@ -313,6 +313,7 @@ function displayResults(data) {
 }
 
 function createOfficialCard(official) {
+    console.log('Creating card for official:', official);
     const card = document.createElement('div');
     card.className = `official-card${official.isLocal ? ' local-official' : ''}`;
 
@@ -325,6 +326,12 @@ function createOfficialCard(official) {
         level = 'State';
     }
 
+    // Create action button
+    const actionButton = document.createElement('button');
+    actionButton.className = 'view-actions-btn';
+    actionButton.textContent = 'View Actions';
+    actionButton.onclick = () => showActionTracker(official);
+
     const content = `
         ${official.photoUrl ? `<img src="${official.photoUrl}" alt="${official.name}" class="official-photo" onerror="this.style.display='none'">` : ''}
         <h3>${official.name}</h3>
@@ -335,205 +342,280 @@ function createOfficialCard(official) {
         ${official.emails ? `<p><strong>Email:</strong> ${official.emails[0]}</p>` : ''}
         ${official.urls ? `<p><a href="${official.urls[0]}" target="_blank" rel="noopener">Official Website</a></p>` : ''}
         ${official.isLocal ? '<div class="local-badge">Your Representative</div>' : ''}
-        <button class="view-actions-btn" onclick="showActionsModal(${JSON.stringify(official)})">
-            View Actions
-        </button>
+        <div class="action-buttons"></div>
     `;
 
     card.innerHTML = content;
+    
+    // Add button to the action-buttons div after setting innerHTML
+    const actionButtons = card.querySelector('.action-buttons');
+    actionButtons.appendChild(actionButton);
+
+    console.log('Created card HTML:', card.outerHTML);
     return card;
 }
 
-// Debounce function to limit API calls
-function debounce(func, wait) {
-    let timeout;
-    return function executedFunction(...args) {
-        const later = () => {
-            clearTimeout(timeout);
-            func(...args);
-        };
-        clearTimeout(timeout);
-        timeout = setTimeout(later, wait);
-    };
-}
+let currentOfficialTracker = null;
+let isRefreshingTracker = false;
 
-// Cache DOM elements
-const resultsContainer = document.getElementById('results');
-const actionsModal = document.getElementById('actionsModal');
-const modalClose = document.querySelector('.close');
-const timeFilter = document.getElementById('timeFilter');
-const actionTypeFilter = document.getElementById('actionTypeFilter');
-const actionsContent = document.getElementById('actionsContent');
-const loadingSpinner = document.getElementById('actionsLoading');
-const errorMessage = document.getElementById('actionsError');
+// Initialize UI elements when the page loads
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM Content Loaded');
+    // Hide the action tracker section initially
+    const actionTrackerSection = document.getElementById('action-tracker');
+    console.log('Action Tracker Section:', actionTrackerSection);
+    if (actionTrackerSection) {
+        actionTrackerSection.style.display = 'none';
+    }
+});
 
-let currentOfficial = null;
-let actionsData = null;
-
-// Create a document fragment for better performance
-function createOfficialCards(officials) {
-    const fragment = document.createDocumentFragment();
+function showActionTracker(official) {
+    console.log('showActionTracker called with:', official);
     
-    officials.forEach(official => {
-        const card = document.createElement('div');
-        card.className = 'official-card';
-        
-        const content = `
-            <h3>${official.name}</h3>
-            <p class="office">${official.office}</p>
-            ${official.party ? `<p class="party">${official.party}</p>` : ''}
-            <div class="contact-info">
-                ${official.phones ? `<p>📞 ${official.phones[0]}</p>` : ''}
-                ${official.emails ? `<p>✉️ <a href="mailto:${official.emails[0]}">${official.emails[0]}</a></p>` : ''}
-                ${official.urls ? `<p>🌐 <a href="${official.urls[0]}" target="_blank">Official Website</a></p>` : ''}
+    if (!official || !official.name) {
+        console.error('Invalid official data:', official);
+        return;
+    }
+    
+    // Get or create the action tracker section
+    let actionTrackerSection = document.getElementById('action-tracker');
+    console.log('Looking for action tracker section...');
+    if (!actionTrackerSection) {
+        console.log('Creating action tracker section...');
+        actionTrackerSection = document.createElement('div');
+        actionTrackerSection.id = 'action-tracker';
+        actionTrackerSection.className = 'action-tracker-section';
+        document.querySelector('.container').appendChild(actionTrackerSection);
+    }
+    console.log('Found/created action tracker section:', actionTrackerSection);
+    
+    // Hide the results section
+    const resultsSection = document.getElementById('results');
+    if (!resultsSection) {
+        console.error('Results section not found in DOM');
+        return;
+    }
+    console.log('Found results section:', resultsSection);
+    
+    // Show action tracker and hide results
+    actionTrackerSection.style.display = 'block';
+    resultsSection.style.display = 'none';
+    
+    // Update action tracker content
+    actionTrackerSection.innerHTML = `
+        <div class="action-tracker-header">
+            <div class="header-top">
+                <button class="back-button" onclick="hideActionTracker()">← Back to Results</button>
+                <h2>Actions - ${official.name}</h2>
             </div>
-            <button class="view-actions-btn" onclick="showActionsModal(${JSON.stringify(official)})">
-                View Actions
-            </button>
-        `;
-        
-        card.innerHTML = content;
-        fragment.appendChild(card);
-    });
-    
-    return fragment;
-}
-
-// Optimize the display of actions
-function displayActions(actions) {
-    actionsData = actions;
-    
-    const timeline = actionsContent.querySelector('.actions-timeline');
-    const summaryCards = {
-        votes: actionsContent.querySelector('.summary-card.votes .count'),
-        press_releases: actionsContent.querySelector('.summary-card.press-releases .count'),
-        news: actionsContent.querySelector('.summary-card.news .count')
-    };
-    
-    // Reset counts using a single loop
-    Object.values(summaryCards).forEach(card => card.textContent = '0');
-    
-    // Create action counts and timeline items in a single pass
-    const actionsByType = {};
-    const timelineFragment = document.createDocumentFragment();
-    
-    actions.forEach(action => {
-        // Update counts
-        actionsByType[action.action_type] = (actionsByType[action.action_type] || 0) + 1;
-        
-        // Create timeline item
-        const item = document.createElement('div');
-        item.className = `timeline-item ${action.action_type}`;
-        item.dataset.type = action.action_type;
-        
-        const date = new Date(action.date);
-        item.innerHTML = `
-            <div class="date">${date.toLocaleDateString()}</div>
-            <div class="title">${action.action_type.replace('_', ' ').toUpperCase()}</div>
-            <div class="description">${action.description}</div>
-            ${action.source_url ? `
-                <div class="source">
-                    <a href="${action.source_url}" target="_blank" rel="noopener noreferrer">View Source</a>
+            <div class="action-tracker-controls">
+                <div class="filter-group">
+                    <label class="filter-label">Time Period:</label>
+                    <select class="filter-select" id="time-filter-tracker" onchange="filterActionsTracker()">
+                        <option value="7">Last 7 days</option>
+                        <option value="30" selected>Last 30 days</option>
+                        <option value="90">Last 90 days</option>
+                        <option value="180">Last 6 months</option>
+                        <option value="365">Last year</option>
+                    </select>
                 </div>
-            ` : ''}
-        `;
-        
-        timelineFragment.appendChild(item);
-    });
+                <div class="filter-group">
+                    <label class="filter-label">Action Type:</label>
+                    <select class="filter-select" id="type-filter-tracker" onchange="filterActionsTracker()">
+                        <option value="all" selected>All Actions</option>
+                        <option value="bill">Bills</option>
+                        <option value="press-release">Press Releases</option>
+                        <option value="news">News</option>
+                    </select>
+                </div>
+                <button class="refresh-button" onclick="refreshActionsTracker()" id="refresh-button-tracker">
+                    <span>Refresh</span>
+                    <span class="loading-spinner" style="display: none;"></span>
+                </button>
+            </div>
+        </div>
+        <div id="actions-container-tracker">
+            <div class="loading-spinner"></div>
+        </div>
+    `;
     
-    // Update summary cards
-    Object.entries(actionsByType).forEach(([type, count]) => {
-        if (summaryCards[type]) {
-            summaryCards[type].textContent = count;
-        }
-    });
+    // Store the current official
+    currentOfficialTracker = official;
+    console.log('Set currentOfficialTracker:', currentOfficialTracker);
     
-    // Clear and update timeline in a single operation
-    timeline.innerHTML = '';
-    timeline.appendChild(timelineFragment);
-    
-    actionsContent.style.display = 'block';
-    filterActions();
+    // Load initial actions
+    loadActionsTracker();
 }
 
-// Optimize filtering
-function filterActions() {
-    const selectedType = actionTypeFilter.value;
-    const timelineItems = document.querySelectorAll('.timeline-item');
+function hideActionTracker() {
+    // Hide the action tracker section
+    const actionTrackerSection = document.getElementById('action-tracker');
+    if (actionTrackerSection) {
+        actionTrackerSection.style.display = 'none';
+    }
     
-    // Use classList for better performance
-    timelineItems.forEach(item => {
-        item.classList.toggle('hidden', selectedType !== 'all' && item.dataset.type !== selectedType);
-    });
+    // Show the results section
+    const resultsSection = document.getElementById('results');
+    if (resultsSection) {
+        resultsSection.style.display = 'block';
+    }
 }
 
-// Debounced search function
-const debouncedSearch = debounce(() => {
-    const address = document.getElementById('address').value;
-    if (address) {
-        searchRepresentatives(address);
-    }
-}, 300);
-
-// Event listeners
-modalClose.onclick = () => {
-    actionsModal.style.display = 'none';
-    currentOfficial = null;
-    actionsData = null;
-};
-
-window.onclick = (event) => {
-    if (event.target === actionsModal) {
-        actionsModal.style.display = 'none';
-        currentOfficial = null;
-        actionsData = null;
-    }
-};
-
-timeFilter.onchange = () => {
-    if (currentOfficial) {
-        fetchOfficialActions(currentOfficial);
-    }
-};
-
-actionTypeFilter.onchange = filterActions;
-
-// Actions Modal
-function showActionsModal(official) {
-    currentOfficial = official;
-    document.getElementById('modalTitle').textContent = `${official.name}'s Actions`;
-    actionsModal.style.display = 'block';
-    fetchOfficialActions(official);
-}
-
-async function fetchOfficialActions(official) {
-    const actionsContent = document.getElementById('actionsContent');
-    const loadingSpinner = document.getElementById('actionsLoading');
-    const errorMessage = document.getElementById('actionsError');
+async function loadActionsTracker() {
+    if (!currentOfficialTracker) return;
+    
+    const actionsContainer = document.getElementById('actions-container-tracker');
+    const timeFilter = document.getElementById('time-filter-tracker').value;
+    const typeFilter = document.getElementById('type-filter-tracker').value;
     
     try {
-        actionsContent.style.display = 'none';
-        loadingSpinner.style.display = 'block';
-        errorMessage.style.display = 'none';
+        // Show loading state
+        actionsContainer.innerHTML = '<div class="loading-spinner"></div>';
         
-        const days = timeFilter.value;
-        const response = await fetch(`/official/actions/${encodeURIComponent(official.name)}?days=${days}`);
+        // Properly encode the name for URL usage
+        const encodedName = encodeURIComponent(currentOfficialTracker.name)
+            .replace(/'/g, '%27')  // Ensure single quotes are properly encoded
+            .replace(/\(/g, '%28') // Ensure parentheses are properly encoded
+            .replace(/\)/g, '%29')
+            .replace(/\./g, '%2E'); // Ensure periods are properly encoded
+        
+        const response = await fetch(`/api/officials/${encodedName}/actions?days=${timeFilter}&type=${typeFilter}`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
         const data = await response.json();
         
-        if (!response.ok) {
-            throw new Error(data.error || 'Failed to fetch actions');
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to load actions');
         }
         
-        displayActions(data.actions);
+        if (!data.actions || data.actions.length === 0) {
+            actionsContainer.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">📭</div>
+                    <h3>No Actions Found</h3>
+                    <p>No recent actions found for this time period and filter.</p>
+                    <button class="refresh-button" onclick="refreshActionsTracker()">
+                        Refresh Actions
+                    </button>
+                </div>
+            `;
+            return;
+        }
+        
+        actionsContainer.innerHTML = data.actions.map(action => `
+            <div class="action-card">
+                <div class="action-date">${formatDate(action.date)}</div>
+                <div class="action-type ${getActionTypeClass(action.type)}">${formatActionType(action.type)}</div>
+                <div class="action-content">${action.description}</div>
+                ${action.source ? `
+                    <div class="action-source">
+                        Source: <a href="${action.source}" target="_blank" rel="noopener noreferrer">View Details</a>
+                    </div>
+                ` : ''}
+            </div>
+        `).join('');
         
     } catch (error) {
-        console.error('Error fetching actions:', error);
-        errorMessage.textContent = error.message;
-        errorMessage.style.display = 'block';
-        actionsContent.style.display = 'none';
-    } finally {
-        loadingSpinner.style.display = 'none';
+        console.error('Error loading actions:', error);
+        actionsContainer.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">⚠️</div>
+                <h3>Error Loading Actions</h3>
+                <p>There was an error loading the actions. Please try again later.</p>
+                <p class="error-details">${error.message}</p>
+                <button class="refresh-button" onclick="refreshActionsTracker()">
+                    Try Again
+                </button>
+            </div>
+        `;
     }
+}
+
+function getActionTypeClass(type) {
+    const typeMap = {
+        'bill_introduced': 'bill',
+        'bill_action': 'bill',
+        'vote': 'bill',
+        'press_release': 'press-release',
+        'news_mention': 'news'
+    };
+    return typeMap[type] || type;
+}
+
+function formatActionType(type) {
+    const typeMap = {
+        'bill_introduced': 'Bill Introduced',
+        'bill_action': 'Bill Action',
+        'vote': 'Vote',
+        'press_release': 'Press Release',
+        'news_mention': 'News'
+    };
+    return typeMap[type] || type.split('_').map(word => 
+        word.charAt(0).toUpperCase() + word.slice(1)
+    ).join(' ');
+}
+
+async function refreshActionsTracker() {
+    if (isRefreshingTracker) return;
+    
+    const refreshButton = document.getElementById('refresh-button-tracker');
+    const spinner = refreshButton.querySelector('.loading-spinner');
+    
+    try {
+        isRefreshingTracker = true;
+        refreshButton.disabled = true;
+        spinner.style.display = 'inline-block';
+        
+        // Call API to refresh actions
+        const response = await fetch(`/api/officials/${encodeURIComponent(currentOfficialTracker.name)}/actions/refresh`, {
+            method: 'POST'
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to refresh actions');
+        }
+        
+        // Show success message
+        const actionsContainer = document.getElementById('actions-container-tracker');
+        actionsContainer.innerHTML = `
+            <div class="success-message">
+                <p>Successfully refreshed actions!</p>
+                <p>Found ${data.count} new actions.</p>
+            </div>
+        `;
+        
+        // Reload actions after a short delay
+        setTimeout(() => loadActionsTracker(), 2000);
+        
+    } catch (error) {
+        console.error('Error refreshing actions:', error);
+        alert(`Error refreshing actions: ${error.message}`);
+    } finally {
+        isRefreshingTracker = false;
+        refreshButton.disabled = false;
+        spinner.style.display = 'none';
+    }
+}
+
+function filterActionsTracker() {
+    loadActionsTracker();
+}
+
+function formatDate(dateString) {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
 }
 
 // Initialize Google Places Autocomplete

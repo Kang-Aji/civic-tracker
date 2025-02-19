@@ -23,61 +23,15 @@
             <button onclick="searchRepresentatives()">Search</button>
         </div>
         <div id="results" class="results-section"></div>
-    </div>
-     <!-- Actions Modal -->
-     <div id="actionsModal" class="modal">
-        <div class="modal-content">
-            <span class="close">&times;</span>
-            <h2 id="modalTitle"></h2>
-            
-            <!-- Filters -->
-            <div class="filters">
-                <select id="timeFilter">
-                    <option value="7">Last 7 days</option>
-                    <option value="30" selected>Last 30 days</option>
-                    <option value="90">Last 90 days</option>
-                    <option value="180">Last 6 months</option>
-                    <option value="365">Last year</option>
-                </select>
-                
-                <select id="actionTypeFilter">
-                    <option value="all" selected>All Actions</option>
-                    <option value="votes">Votes</option>
-                    <option value="press_releases">Press Releases</option>
-                    <option value="news">News Mentions</option>
-                </select>
-            </div>
-            
-            <!-- Loading Spinner -->
-            <div id="actionsLoading" class="loading-spinner"></div>
-            
-            <!-- Error Message -->
-            <div id="actionsError" class="error-message"></div>
-            
-            <!-- Actions Content -->
-            <div id="actionsContent" style="display: none;">
-                <!-- Summary Cards -->
-                <div class="summary-cards">
-                    <div class="summary-card votes">
-                        <h3>Votes</h3>
-                        <div class="count">0</div>
-                    </div>
-                    <div class="summary-card press-releases">
-                        <h3>Press Releases</h3>
-                        <div class="count">0</div>
-                    </div>
-                    <div class="summary-card news">
-                        <h3>News Mentions</h3>
-                        <div class="count">0</div>
-                    </div>
-                </div>
-                
-                <!-- Timeline -->
-                <div class="actions-timeline"></div>
-            </div>
+        
+        <!-- Action Tracker Section -->
+        <div id="action-tracker" class="action-tracker-section">
+            <!-- Content will be dynamically loaded -->
         </div>
     </div>
     
+    <!-- Load JavaScript -->
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
     <script>
         // Load Google Maps API dynamically
         function loadGoogleMapsAPI() {
@@ -95,9 +49,17 @@
             document.getElementById('address').disabled = true;
         };
 
-        // Load API when document is ready
-        document.addEventListener('DOMContentLoaded', loadGoogleMapsAPI);
+        // Initialize UI elements
+        document.addEventListener('DOMContentLoaded', function() {
+            // Hide the action tracker section initially
+            const actionTrackerSection = document.getElementById('action-tracker');
+            if (actionTrackerSection) {
+                actionTrackerSection.style.display = 'none';
+            }
+        });
+
+        // Load the Google Maps API
+        loadGoogleMapsAPI();
     </script>
-    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>

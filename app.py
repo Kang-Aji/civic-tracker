@@ -1,18 +1,35 @@
 from flask import Flask, render_template, jsonify, request, g
+from flask_sqlalchemy import SQLAlchemy
+import os
+from dotenv import load_dotenv
 import requests
 import json
-from config import GOOGLE_API_KEY, DEBUG, CIVIC_INFO_API_URL, PROPUBLICA_API_KEY
-import time
 from models import db, OfficialAction, ActionSource
 from services.action_tracker import ActionTracker
 from flask_migrate import Migrate
 from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask_caching import Cache
-import os
+import time
+from threading import Thread
+import logging
+
+# Load environment variables
+load_dotenv()
+
+# Get configuration from environment variables
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+CONGRESS_API_KEY = os.getenv('CONGRESS_API_KEY')
+PROPUBLICA_API_KEY = os.getenv('PROPUBLICA_API_KEY')
+CIVIC_INFO_API_URL = os.getenv('CIVIC_INFO_API_URL', 'https://www.googleapis.com/civicinfo/v2/representatives')
+DEBUG = True  # Force debug mode on
 
 app = Flask(__name__)
 app.debug = DEBUG
+
+# Add more detailed logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # Database configuration
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///civic_tracker.db'
@@ -22,12 +39,11 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db.init_app(app)
 migrate = Migrate(app, db)
 
-# Update cache configuration for better performance
-cache = Cache(app, config={
-    'CACHE_TYPE': 'simple',
-    'CACHE_DEFAULT_TIMEOUT': 300,  # 5 minutes
-    'CACHE_THRESHOLD': 1000  # Store up to 1000 items in cache
-})
+# Initialize Flask-Caching
+cache = Cache(app, config={'CACHE_TYPE': 'simple'})
+
+# Initialize action tracker with cache and Congress API key
+action_tracker = ActionTracker(cache, CONGRESS_API_KEY)
 
 @app.before_request
 def before_request():
@@ -43,17 +59,22 @@ def after_request(response):
         app.logger.info(f'Request completed in {elapsed:.2f}s: {request.path}')
     return response
 
-# Initialize action tracker
-action_tracker = ActionTracker(propublica_api_key=PROPUBLICA_API_KEY)
-
 # Cache for storing all officials data
 all_officials_cache = None
 last_cache_update = None
 CACHE_DURATION = 3600  # Cache duration in seconds (1 hour)
 
 def normalize_name(name):
-    """Normalize official names for comparison"""
-    return ' '.join(name.lower().split())
+    """Normalize official names for comparison while preserving special characters"""
+    import unicodedata
+    
+    # Normalize unicode characters (e.g., convert é to e with accent)
+    normalized = unicodedata.normalize('NFKC', name)
+    
+    # Remove extra whitespace while preserving special characters
+    normalized = ' '.join(normalized.split())
+    
+    return normalized
 
 def create_official_key(official, offices):
     """Create a unique key for an official based on name and role"""
@@ -298,40 +319,11 @@ def all_officials():
             }
         }), 500
 
-@app.route('/all_officials')
-def get_all_officials():
-    """Get all officials from the database"""
-    try:
-        # For now, we'll return a default set of officials
-        default_officials = [
-            {
-                "name": "Joseph R. Biden",
-                "offices": ["President of the United States"],
-                "party": "Democratic",
-                "phones": ["202-456-1111"],
-                "emails": ["president@whitehouse.gov"],
-                "urls": ["https://www.whitehouse.gov/"]
-            },
-            {
-                "name": "Kamala D. Harris",
-                "offices": ["Vice President of the United States"],
-                "party": "Democratic",
-                "phones": ["202-456-1111"],
-                "emails": ["vice.president@whitehouse.gov"],
-                "urls": ["https://www.whitehouse.gov/administration/vice-president-harris/"]
-            }
-        ]
-        
-        return jsonify(default_officials)
-        
-    except Exception as e:
-        app.logger.error(f'Error in get_all_officials: {str(e)}')
-        return jsonify({'error': 'Error fetching officials'}), 500
-
 @app.route('/search_representatives')
 def search_representatives():
     address = request.args.get('address')
     if not address:
+        logger.warning("Address parameter missing in search_representatives request")
         return jsonify({'error': 'Address is required'}), 400
 
     params = {
@@ -340,19 +332,23 @@ def search_representatives():
     }
     
     try:
-        if DEBUG:
-            print(f"Searching representatives for address: {address}")
-            print(f"Requesting: {CIVIC_INFO_API_URL}")
-            print(f"Params: {json.dumps(params, indent=2)}")
+        logger.info(f"Searching representatives for address: {address}")
+        logger.debug(f"Making request to: {CIVIC_INFO_API_URL}")
+        
+        if not GOOGLE_API_KEY:
+            logger.error("GOOGLE_API_KEY is not configured")
+            return jsonify({
+                'error': 'Google API key is not configured. Please set the GOOGLE_API_KEY environment variable.'
+            }), 500
 
         response = requests.get(CIVIC_INFO_API_URL, params=params)
         
-        if DEBUG:
-            print(f"Status Code: {response.status_code}")
-            print(f"Response Headers: {json.dumps(dict(response.headers), indent=2)}")
+        logger.debug(f"Response status code: {response.status_code}")
         
         if response.status_code == 403:
-            error_msg = response.json().get('error', {}).get('message', 'Access Forbidden')
+            error_data = response.json()
+            error_msg = error_data.get('error', {}).get('message', 'Access Forbidden')
+            logger.error(f"API Access Error: {error_msg}")
             return jsonify({
                 'error': f'API Access Error: {error_msg}\n' +
                         'Please ensure you have:\n' +
@@ -363,24 +359,38 @@ def search_representatives():
                         '5. Enabled billing for your Google Cloud Project'
             }), 403
         elif response.status_code == 400:
+            error_data = response.json()
+            error_msg = error_data.get('error', {}).get('message', 'Invalid address')
+            logger.warning(f"Invalid address error: {error_msg}")
             return jsonify({
-                'error': 'Invalid address format or the address could not be found'
+                'error': 'Invalid address format or the address could not be found',
+                'details': error_msg
             }), 400
         
         response.raise_for_status()
         data = response.json()
         
-        if DEBUG:
-            print(f"Found {len(data.get('officials', []))} officials and {len(data.get('offices', []))} offices for address")
+        officials_count = len(data.get('officials', []))
+        offices_count = len(data.get('offices', []))
+        logger.info(f"Found {officials_count} officials and {offices_count} offices for address")
             
         return jsonify(data)
+        
     except requests.exceptions.RequestException as e:
-        if DEBUG:
-            print(f"Error: {str(e)}")
+        logger.error(f"Request error in search_representatives: {str(e)}")
         error_message = str(e)
         if 'API not enabled' in error_message:
             error_message = 'The Google Civic Information API is not enabled. Please enable it in your Google Cloud Console.'
-        return jsonify({'error': error_message}), 500
+        return jsonify({
+            'error': error_message,
+            'type': 'request_error'
+        }), 500
+    except Exception as e:
+        logger.error(f"Unexpected error in search_representatives: {str(e)}", exc_info=True)
+        return jsonify({
+            'error': 'An unexpected error occurred while fetching representatives',
+            'type': 'server_error'
+        }), 500
 
 @app.route('/search')
 def search():
@@ -446,79 +456,218 @@ def search():
         app.logger.error(f'Error in search: {str(e)}')
         return jsonify({'error': 'Error processing request'}), 500
 
-@app.route('/official/actions/<path:official_name>')
-@cache.memoize(timeout=300)  # Cache for 5 minutes
-def get_official_actions(official_name):
-    """Get recent actions for a specific official with optimized queries"""
+@app.route('/api/officials/<path:n>/actions')
+def get_official_actions(n):
+    """Get actions for a specific official with filtering"""
+    logger.debug(f"Received request for official actions: {n}")
     try:
-        # Get the time range from query parameters (default to last 30 days)
-        days = request.args.get('days', 30, type=int)
-        if days > 365:  # Limit to maximum of 1 year
-            days = 365
+        days = request.args.get('days', '30')
+        action_type = request.args.get('type', 'all')
+        
+        logger.debug(f"Query parameters: days={days}, type={action_type}")
+        
+        # Convert days to integer
+        try:
+            days = int(days)
+        except ValueError:
+            days = 30
             
-        since_date = datetime.utcnow() - timedelta(days=days)
+        # URL decode the name and normalize it
+        from urllib.parse import unquote
+        decoded_name = normalize_name(unquote(n))
+        logger.debug(f"Decoded and normalized name: {decoded_name}")
         
-        # Use a single optimized query with joins if needed
-        actions = OfficialAction.query.filter(
-            OfficialAction.official_name == official_name,
-            OfficialAction.date >= since_date
-        ).order_by(OfficialAction.date.desc()).all()
+        # Get actions from database using normalized name
+        query = OfficialAction.query.filter(
+            OfficialAction.official_name == decoded_name,
+            OfficialAction.date >= (datetime.utcnow() - timedelta(days=days))
+        )
+        logger.debug(f"Database query: {query}")
         
-        # Convert to dict outside of the query for better performance
-        action_dicts = [action.to_dict() for action in actions]
+        # Map frontend type to database type
+        type_mapping = {
+            'bill': ['bill_introduced', 'bill_action', 'vote'],
+            'press-release': ['press_release'],
+            'news': ['news_mention']
+        }
+        
+        # Apply type filter if not 'all'
+        if action_type != 'all' and action_type in type_mapping:
+            query = query.filter(OfficialAction.action_type.in_(type_mapping[action_type]))
+            
+        actions = query.order_by(OfficialAction.date.desc()).all()
+        
+        if not actions:
+            return jsonify({
+                'success': True,
+                'actions': []
+            })
         
         return jsonify({
-            'official_name': official_name,
-            'actions': action_dicts,
-            'total_count': len(actions)
+            'success': True,
+            'actions': [{
+                'id': action.id,
+                'date': action.date.isoformat(),
+                'action_type': action.action_type,
+                'description': action.description,
+                'source': action.source_url
+            } for action in actions]
         })
         
     except Exception as e:
-        app.logger.error(f'Error fetching actions: {str(e)}')
+        app.logger.error(f"Error getting actions for {n}: {str(e)}")
         return jsonify({
+            'success': False,
             'error': f'Error fetching actions: {str(e)}'
         }), 500
 
-@app.route('/official/actions/update/<path:official_name>', methods=['POST'])
-def update_official_actions(official_name):
-    """Manually trigger an update of official's actions"""
+@app.route('/api/officials/<path:n>/actions/refresh', methods=['POST'])
+def refresh_official_actions(n):
+    """Refresh actions for a specific official"""
     try:
-        office = request.json.get('office', '')
-        count = action_tracker.update_official_actions(official_name, office)
+        # URL decode the name
+        from urllib.parse import unquote
+        decoded_name = unquote(n)
         
-        return jsonify({
-            'message': f'Successfully updated actions for {official_name}',
-            'new_actions_count': count
-        })
+        # Get the official's sources
+        sources = ActionSource.query.filter_by(official_name=decoded_name).all()
         
-    except Exception as e:
-        return jsonify({
-            'error': f'Error updating actions: {str(e)}'
-        }), 500
-
-@app.route('/official/sources', methods=['POST'])
-def add_action_source():
-    """Add a new source for tracking official actions"""
-    try:
-        data = request.json
-        source = ActionSource(
-            official_name=data['official_name'],
-            source_type=data['source_type'],
-            source_url=data['source_url']
-        )
-        db.session.add(source)
+        if not sources:
+            # Create default sources for the official
+            sources = [
+                ActionSource(
+                    official_name=decoded_name,
+                    source_type='congress_api',
+                    source_url='https://api.congress.gov/v3/member'
+                ),
+                ActionSource(
+                    official_name=decoded_name,
+                    source_type='press_release',
+                    source_url=f'https://www.congress.gov/member/{decoded_name.lower().replace(" ", "-")}/news'
+                )
+            ]
+            for source in sources:
+                db.session.add(source)
+            db.session.commit()
+        
+        # Use action tracker to fetch new actions
+        actions = action_tracker.fetch_official_actions(decoded_name, sources)
+        
+        # Add actions to database
+        for action in actions:
+            existing = OfficialAction.query.filter_by(
+                official_name=decoded_name,
+                date=action['date'],
+                description=action['description']
+            ).first()
+            
+            if not existing:
+                new_action = OfficialAction(
+                    official_name=decoded_name,
+                    office=action.get('office', 'Unknown'),
+                    action_type=action.get('action_type', 'unknown'),
+                    description=action['description'],
+                    date=action['date'],
+                    source_url=action.get('source_url'),
+                    source_type=action.get('source_type')
+                )
+                db.session.add(new_action)
+        
         db.session.commit()
         
         return jsonify({
-            'message': 'Source added successfully',
-            'source': source.to_dict()
+            'success': True,
+            'message': f'Successfully refreshed actions for {decoded_name}',
+            'count': len(actions)
         })
         
     except Exception as e:
-        db.session.rollback()
+        app.logger.error(f"Error refreshing actions for {n}: {str(e)}")
         return jsonify({
-            'error': f'Error adding source: {str(e)}'
+            'success': False,
+            'error': f'Error refreshing actions: {str(e)}'
         }), 500
+
+@app.route('/api/officials/<path:n>/sources', methods=['GET'])
+def get_official_sources(n):
+    """Get action sources for a specific official"""
+    try:
+        # URL decode the name
+        from urllib.parse import unquote
+        decoded_name = unquote(n)
+        
+        sources = ActionSource.query.filter_by(official_name=decoded_name).all()
+        return jsonify([{
+            'type': source.source_type,
+            'url': source.source_url
+        } for source in sources]), 200
+        
+    except Exception as e:
+        app.logger.error(f"Error getting sources for {n}: {str(e)}")
+        return jsonify({'error': 'Failed to get official sources'}), 500
+
+@app.route('/api/officials/<path:n>/sources', methods=['POST'])
+def add_official_source(n):
+    """Add a new action source for an official"""
+    try:
+        # URL decode the name
+        from urllib.parse import unquote
+        decoded_name = unquote(n)
+        
+        data = request.get_json()
+        
+        # Validate required fields
+        if not all(k in data for k in ['type', 'url']):
+            return jsonify({'error': 'Missing required fields'}), 400
+            
+        # Create new source
+        source = ActionSource(
+            official_name=decoded_name,
+            source_type=data['type'],
+            source_url=data['url']
+        )
+        
+        db.session.add(source)
+        db.session.commit()
+        
+        return jsonify({'message': 'Source added successfully'}), 201
+        
+    except Exception as e:
+        app.logger.error(f"Error adding source for {n}: {str(e)}")
+        db.session.rollback()
+        return jsonify({'error': 'Failed to add official source'}), 500
+
+@app.route('/api/officials/<path:n>/sources', methods=['DELETE'])
+def remove_official_source(n):
+    """Remove an action source for an official"""
+    try:
+        # URL decode the name
+        from urllib.parse import unquote
+        decoded_name = unquote(n)
+        
+        data = request.get_json()
+        
+        # Validate required fields
+        if 'url' not in data:
+            return jsonify({'error': 'Missing source URL'}), 400
+            
+        # Find and delete source
+        source = ActionSource.query.filter_by(
+            official_name=decoded_name,
+            source_url=data['url']
+        ).first()
+        
+        if source:
+            db.session.delete(source)
+            db.session.commit()
+            return jsonify({'message': 'Source removed successfully'}), 200
+        else:
+            return jsonify({'error': 'Source not found'}), 404
+            
+    except Exception as e:
+        app.logger.error(f"Error removing source for {n}: {str(e)}")
+        db.session.rollback()
+        return jsonify({'error': 'Failed to remove official source'}), 500
 
 def setup_action_updates():
     """Set up scheduled updates with optimized batch processing"""
@@ -527,43 +676,57 @@ def setup_action_updates():
     def update_all_actions():
         with app.app_context():
             try:
-                # Get sources in batches to avoid memory issues
-                batch_size = 50
-                offset = 0
+                # Get all tracked officials from the database
+                tracked_officials = db.session.query(ActionSource.official_name).distinct().all()
                 
-                while True:
-                    sources = ActionSource.query.filter(
-                        (ActionSource.last_checked.is_(None)) |
-                        (ActionSource.last_checked <= datetime.utcnow() - timedelta(hours=24))
-                    ).offset(offset).limit(batch_size).all()
+                # Update actions in batches
+                batch_size = 5
+                for i in range(0, len(tracked_officials), batch_size):
+                    batch = tracked_officials[i:i + batch_size]
                     
-                    if not sources:
-                        break
-                        
-                    for source in sources:
+                    for official in batch:
                         try:
-                            action_tracker.update_official_actions(source.official_name)
-                            source.last_checked = datetime.utcnow()
+                            # Get latest actions for the official
+                            actions = action_tracker.get_official_actions(official.official_name)
+                            
+                            # Update database with new actions
+                            for action in actions:
+                                existing = OfficialAction.query.filter_by(
+                                    official_name=official.official_name,
+                                    date=action['date'],
+                                    description=action['description']
+                                ).first()
+                                
+                                if not existing:
+                                    new_action = OfficialAction(
+                                        official_name=official.official_name,
+                                        action_date=action['date'],
+                                        action_type=action['type'],
+                                        description=action['description'],
+                                        source_url=action['source']
+                                    )
+                                    db.session.add(new_action)
+                            
+                            db.session.commit()
+                            app.logger.info(f"Updated actions for {official.official_name}")
+                            
                         except Exception as e:
-                            app.logger.error(f"Error updating actions for {source.official_name}: {str(e)}")
-                    
-                    db.session.commit()
-                    offset += batch_size
+                            app.logger.error(f"Error updating actions for {official.official_name}: {str(e)}")
+                            db.session.rollback()
+                            continue
+                            
+                    # Add a small delay between batches to prevent rate limiting
+                    time.sleep(2)
                     
             except Exception as e:
-                app.logger.error(f"Error in batch update: {str(e)}")
-                db.session.rollback()
-    
-    # Schedule updates to run every 6 hours
-    scheduler.add_job(
-        update_all_actions,
-        'interval',
-        hours=6,
-        id='update_official_actions',
-        max_instances=1  # Prevent overlapping jobs
-    )
-    
+                app.logger.error(f"Error in update_all_actions: {str(e)}")
+                
+    # Schedule updates to run every hour
+    scheduler.add_job(update_all_actions, 'interval', hours=1)
     scheduler.start()
+    
+    # Run initial update
+    Thread(target=update_all_actions).start()
 
 # Start the action update scheduler when the app starts
 if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
